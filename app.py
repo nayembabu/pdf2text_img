@@ -25,7 +25,70 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 # Text Helper Functions
 # ══════════════════════════════════════════════
 
+## Bengali character sets
+_VOWEL_SET = set('\u09BE\u09BF\u09C0\u09C1\u09C2\u09C3\u09C4\u09C7\u09C8\u09CB\u09CC\u09CD\u09D7')
+_CONS_SET  = set(chr(c) for c in range(0x0995, 0x09BA)) | {'\u09CE'} | set(chr(c) for c in range(0x09DC, 0x09E0))
+_NUKTA     = '\u09BC'
+_ANUSVAR   = set('\u0981\u0982\u0983')
+_HASANTA   = '\u09CD'
+_ALL_BN    = _VOWEL_SET | _CONS_SET | _ANUSVAR | {_NUKTA}
+
+
+def fix_bengali_spacing(text: str) -> str:
+    """
+    PDF থেকে extract করা বাংলা টেক্সটে ভাঙা অক্ষরের মাঝে
+    অপ্রয়োজনীয় space সরিয়ে সঠিক করে।
+    যেমন: "ক ুমিল্লা" → "কুমিল্লা", "চ ট্টগ্রাম" → "চট্টগ্রাম"
+    """
+    if not text:
+        return text
+
+    chars  = list(text)
+    result = []
+    i      = 0
+
+    while i < len(chars):
+        ch = chars[i]
+
+        if ch == ' ' and i + 1 < len(chars):
+            next_ch = chars[i + 1]
+            prev_ch = result[-1] if result else ''
+
+            # Rule 1: space এর পরে vowel sign → space সরাও
+            # "ক ু" → "কু",  "হ ু" → "হু"
+            if next_ch in _VOWEL_SET and prev_ch in _ALL_BN:
+                i += 1
+                continue
+
+            # Rule 2: space এর পরে nukta / anusvar → সরাও
+            if next_ch in (_ANUSVAR | {_NUKTA}) and prev_ch in _ALL_BN:
+                i += 1
+                continue
+
+            # Rule 3: consonant + space + consonant + hasanta (যুক্তবর্ণ ভেঙেছে)
+            # "চ ট্ট" → "চট্ট"
+            if (prev_ch in _CONS_SET and next_ch in _CONS_SET
+                    and i + 2 < len(chars) and chars[i + 2] == _HASANTA):
+                i += 1
+                continue
+
+            # Rule 4: একা consonant + space + consonant + vowel → জোড়া লাগাও
+            # "ব রি" → "বরি"  কিন্তু "র হু" নয় (র এর আগে vowel আছে → আলাদা শব্দ)
+            if (prev_ch in _CONS_SET and next_ch in _CONS_SET
+                    and i + 2 < len(chars) and chars[i + 2] in _VOWEL_SET):
+                prev_prev = result[-2] if len(result) >= 2 else ''
+                if prev_prev not in _VOWEL_SET:
+                    i += 1
+                    continue
+
+        result.append(ch)
+        i += 1
+
+    return ''.join(result)
+
+
 def sanitize_bengali(text: str) -> str:
+    """repeated visarga / vowel sign collapse"""
     VOWEL_SIGNS = set(chr(c) for c in range(0x09BE, 0x09CD + 1))
     MARKS = set(['\u0981', '\u0982', '\u0983', '\u09BC', '\u09D7'])
     out = []
@@ -57,7 +120,8 @@ def clean_text(text):
         return ""
     text = unicodedata.normalize('NFC', text)
     text = re.sub(r'\s+', ' ', text)
-    text = sanitize_bengali(text)
+    text = fix_bengali_spacing(text)   # ← PDF spacing fix (নতুন)
+    text = sanitize_bengali(text)       # ← duplicate mark fix
     return text.strip()
 
 
@@ -253,7 +317,7 @@ def parse_nid_pdf(pdf_path):
     doc.close()
     result["photo"] = photo_b64
 
-    # ── Signature: pypdfium2 দিয়ে processing ──
+    # ── Signature: pypdfium2 দিয়ে smart type detection + processing ──
     sig_b64 = None
     try:
         doc2        = pdfium.PdfDocument(pdf_path)
@@ -262,28 +326,50 @@ def parse_nid_pdf(pdf_path):
         IMAGE_TYPE  = pdfium_r.FPDF_PAGEOBJ_IMAGE
         SCALE       = 4
 
-        bitmap      = page.render(scale=SCALE)
-        pil_page    = bitmap.to_pil()
         img_objects = list(page.get_objects(filter=[IMAGE_TYPE]))
 
         if len(img_objects) >= 2:
-            obj    = img_objects[1]
-            matrix = obj.get_matrix()
-            x, y, w, h = matrix.e, matrix.f, matrix.a, matrix.d
-            PAD    = 20
-            crop   = pil_page.crop((
-                max(0, int(x * SCALE) - PAD),
-                max(0, int((page_height - y - h) * SCALE) - PAD),
-                min(pil_page.width,  int((x + w) * SCALE) + PAD),
-                min(pil_page.height, int((page_height - y) * SCALE) + PAD),
-            ))
-            gray   = crop.convert("L")
-            auto   = ImageOps.autocontrast(gray, cutoff=1)
-            arr    = np.array(auto)
-            binary = np.where(arr < 128, 0, 255).astype(np.uint8)
-            inner  = remove_border(binary, inner_pad=8)
-            result_img = Image.fromarray(inner).filter(ImageFilter.SHARPEN)
+            obj = img_objects[1]  # signature object
+
+            # ── Direct bitmap দিয়ে type detect করা ──
+            direct_bitmap = obj.get_bitmap()
+            direct_pil    = direct_bitmap.to_pil()
+            direct_arr    = np.array(direct_pil.convert("L"))
+            direct_mean   = direct_arr.mean()
+            direct_unique = len(np.unique(direct_arr))
+
+            if direct_mean < 50 or direct_unique < 20:
+                # ── Type A: Transparent/Vector ──
+                # page render করে crop → threshold → border removal
+                bitmap   = page.render(scale=SCALE)
+                pil_page = bitmap.to_pil()
+                matrix   = obj.get_matrix()
+                x, y, w, h = matrix.e, matrix.f, matrix.a, matrix.d
+                PAD  = 20
+                crop = pil_page.crop((
+                    max(0, int(x * SCALE) - PAD),
+                    max(0, int((page_height - y - h) * SCALE) - PAD),
+                    min(pil_page.width,  int((x + w) * SCALE) + PAD),
+                    min(pil_page.height, int((page_height - y) * SCALE) + PAD),
+                ))
+                gray       = crop.convert("L")
+                auto       = ImageOps.autocontrast(gray, cutoff=1)
+                arr        = np.array(auto)
+                binary     = np.where(arr < 128, 0, 255).astype(np.uint8)
+                inner      = remove_border(binary, inner_pad=8)
+                result_img = Image.fromarray(inner).filter(ImageFilter.SHARPEN)
+
+            else:
+                # ── Type B: Raster Image ──
+                # direct bitmap → autocontrast → white bg trim
+                gray        = direct_pil.convert("L")
+                auto        = ImageOps.autocontrast(gray, cutoff=2)
+                arr         = np.array(auto)
+                trimmed     = np.where(arr > 240, 255, arr).astype(np.uint8)
+                result_img  = Image.fromarray(trimmed).filter(ImageFilter.SHARPEN)
+
             sig_b64 = pil_to_base64(result_img)
+
         doc2.close()
     except Exception as e:
         print(f"Signature error: {e}")
