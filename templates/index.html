@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NID PDF Extractor</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0e1a;
+    --surface:   #111827;
+    --surface2:  #1a2235;
+    --border:    #1e3a5f;
+    --accent:    #00d4ff;
+    --accent2:   #0080ff;
+    --green:     #00e5a0;
+    --red:       #ff4d6d;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --radius:    12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans Bengali', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── Background grid ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 0;
+    background: rgba(10,14,26,.9);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .header-inner {
+    display: flex; align-items: center; gap: 14px;
+  }
+
+  .logo {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: grid; place-items: center;
+    font-size: 20px;
+    box-shadow: 0 0 20px rgba(0,212,255,.3);
+  }
+
+  .header-title h1 {
+    font-size: 1.2rem; font-weight: 700; letter-spacing: -.3px;
+  }
+  .header-title p { font-size: .75rem; color: var(--muted); margin-top: 2px; }
+
+  /* ── Upload Zone ── */
+  .upload-section {
+    padding: 60px 0 40px;
+  }
+
+  .upload-card {
+    background: var(--surface);
+    border: 2px dashed var(--border);
+    border-radius: 20px;
+    padding: 60px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .3s ease;
+    position: relative; overflow: hidden;
+  }
+
+  .upload-card::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(0,212,255,.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .upload-card:hover, .upload-card.drag-over {
+    border-color: var(--accent);
+    box-shadow: 0 0 40px rgba(0,212,255,.12);
+    transform: translateY(-2px);
+  }
+
+  .upload-icon {
+    font-size: 52px; margin-bottom: 20px;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50%       { transform: translateY(-8px); }
+  }
+
+  .upload-card h2 { font-size: 1.4rem; margin-bottom: 8px; }
+  .upload-card p  { color: var(--muted); font-size: .9rem; margin-bottom: 28px; }
+
+  .btn-upload {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    color: #fff; border: none; padding: 12px 28px;
+    border-radius: 50px; font-size: .95rem; font-weight: 600;
+    cursor: pointer; transition: all .3s;
+    font-family: inherit;
+    box-shadow: 0 4px 20px rgba(0,128,255,.35);
+  }
+  .btn-upload:hover { transform: translateY(-2px); box-shadow: 0 6px 28px rgba(0,128,255,.5); }
+
+  #file-input { display: none; }
+
+  .file-info {
+    margin-top: 20px; font-size: .85rem; color: var(--accent);
+    display: none;
+  }
+  .file-info.show { display: block; }
+
+  /* ── Progress ── */
+  .progress-wrap {
+    margin-top: 28px; display: none;
+  }
+  .progress-wrap.show { display: block; }
+
+  .progress-bar {
+    height: 4px; background: var(--surface2);
+    border-radius: 4px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 4px;
+    width: 0%;
+    transition: width .4s ease;
+    box-shadow: 0 0 10px var(--accent);
+  }
+  .progress-text {
+    margin-top: 10px; font-size: .82rem; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Result Section ── */
+  #result-section { display: none; padding-bottom: 80px; }
+  #result-section.show { display: block; }
+
+  .section-divider {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 32px;
+  }
+  .section-divider h2 { font-size: 1.1rem; font-weight: 600; white-space: nowrap; }
+  .section-divider::after {
+    content: ''; flex: 1; height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  /* ── ID Card Preview ── */
+  .id-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 28px;
+    align-items: start;
+    position: relative; overflow: hidden;
+  }
+
+  .id-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent), var(--green));
+  }
+
+  .id-photo {
+    width: 100px; height: 120px;
+    border-radius: 10px; overflow: hidden;
+    border: 2px solid var(--border);
+    background: var(--surface2);
+    display: grid; place-items: center;
+    flex-shrink: 0;
+  }
+  .id-photo img { width: 100%; height: 100%; object-fit: cover; }
+  .id-photo .no-photo { color: var(--muted); font-size: 2rem; }
+
+  .id-info { min-width: 0; }
+  .id-name-bn { font-size: 1.6rem; font-weight: 700; margin-bottom: 4px; }
+  .id-name-en { font-size: .95rem; color: var(--muted); margin-bottom: 16px; letter-spacing: .5px; }
+
+  .id-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 50px; font-size: .78rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .badge-blue  { background: rgba(0,128,255,.15); color: var(--accent); border: 1px solid rgba(0,128,255,.25); }
+  .badge-green { background: rgba(0,229,160,.12); color: var(--green);  border: 1px solid rgba(0,229,160,.2); }
+  .badge-gray  { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  .id-nid {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .82rem; color: var(--muted);
+  }
+  .id-nid span { color: var(--text); font-weight: 600; }
+
+  .id-signature {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  .id-signature img {
+    max-width: 140px; max-height: 60px;
+    background: #fff; border-radius: 6px; padding: 6px;
+    border: 1px solid var(--border);
+  }
+  .id-signature p { font-size: .72rem; color: var(--muted); }
+
+  /* ── Data Grid ── */
+  .data-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .data-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+
+  .data-card h3 {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--accent); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .field-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 7px 0; border-bottom: 1px solid rgba(30,58,95,.5);
+    gap: 12px;
+  }
+  .field-row:last-child { border-bottom: none; }
+
+  .field-key {
+    font-size: .75rem; color: var(--muted); flex-shrink: 0;
+    max-width: 45%;
+  }
+  .field-val {
+    font-size: .82rem; text-align: right;
+    word-break: break-word;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .field-val.bangla { font-family: 'Noto Sans Bengali', sans-serif; font-size: .88rem; }
+  .field-val.empty  { color: var(--muted); font-style: italic; }
+
+  /* ── Address Cards ── */
+  .addr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+
+  .addr-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .addr-card h3 {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--green); margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── JSON Block ── */
+  .json-section { margin-bottom: 28px; }
+
+  .json-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: .88rem; font-weight: 600;
+    transition: all .2s;
+  }
+  .json-toggle:hover { border-color: var(--accent); }
+
+  .json-body {
+    display: none;
+    background: #060a14;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    padding: 20px;
+    overflow-x: auto;
+  }
+  .json-body.open { display: block; }
+  .json-body pre {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .78rem; line-height: 1.7;
+    color: #a8d8ff;
+  }
+
+  .btn-copy {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 16px; border-radius: 8px;
+    font-size: .8rem; cursor: pointer; transition: all .2s;
+    font-family: inherit;
+  }
+  .btn-copy:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Error ── */
+  .error-box {
+    background: rgba(255,77,109,.08);
+    border: 1px solid rgba(255,77,109,.3);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    color: var(--red);
+    display: none;
+    margin-bottom: 24px;
+  }
+  .error-box.show { display: flex; align-items: center; gap: 12px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 680px) {
+    .id-card { grid-template-columns: 1fr; }
+    .id-signature { align-items: flex-start; }
+    .addr-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <div class="logo">🪪</div>
+      <div class="header-title">
+        <h1>NID PDF Extractor</h1>
+        <p>জাতীয় পরিচয়পত্র থেকে তথ্য বের করুন</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Upload Section -->
+  <section class="upload-section">
+    <div class="upload-card" id="drop-zone">
+      <span class="upload-icon">📄</span>
+      <h2>PDF ফাইল আপলোড করুন</h2>
+      <p>ফাইল এখানে টেনে আনুন অথবা নিচের বোতামে ক্লিক করুন</p>
+      <button class="btn-upload" onclick="document.getElementById('file-input').click()">
+        📁 ফাইল বেছে নিন
+      </button>
+      <input type="file" id="file-input" accept=".pdf">
+      <div class="file-info" id="file-info"></div>
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="progress-text" id="progress-text">প্রসেস করা হচ্ছে...</div>
+      </div>
+    </div>
+
+    <div class="error-box" id="error-box">
+      <span>⚠️</span>
+      <span id="error-msg"></span>
+    </div>
+  </section>
+
+  <!-- Result Section -->
+  <section id="result-section">
+
+    <!-- ID Card Preview -->
+    <div class="id-card" id="id-card-preview">
+      <div class="id-photo" id="photo-wrap">
+        <span class="no-photo">👤</span>
+      </div>
+      <div class="id-info">
+        <div class="id-name-bn" id="name-bn">—</div>
+        <div class="id-name-en" id="name-en">—</div>
+        <div class="id-badges" id="badges"></div>
+        <div class="id-nid">NID: <span id="nid-num">—</span></div>
+        <div class="id-nid" style="margin-top:4px">Voter No: <span id="voter-num">—</span></div>
+      </div>
+      <div class="id-signature" id="sig-wrap">
+        <p>স্বাক্ষর</p>
+      </div>
+    </div>
+
+    <!-- Personal Info -->
+    <div class="section-divider"><h2>👤 ব্যক্তিগত তথ্য</h2></div>
+    <div class="data-grid" id="personal-grid"></div>
+
+    <!-- Address -->
+    <div class="section-divider"><h2>🏠 ঠিকানা</h2></div>
+    <div class="addr-grid" id="addr-grid"></div>
+
+    <!-- Other Info -->
+    <div class="section-divider"><h2>📋 অন্যান্য তথ্য</h2></div>
+    <div class="data-grid" id="other-grid"></div>
+
+    <!-- JSON -->
+    <div class="json-section">
+      <div class="section-divider"><h2>🗂️ Raw JSON</h2></div>
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <button class="btn-copy" onclick="toggleJson()">📂 JSON দেখুন/লুকান</button>
+        <button class="btn-copy" onclick="copyJson()">📋 কপি করুন</button>
+        <button class="btn-copy" onclick="downloadJson()">⬇️ ডাউনলোড</button>
+      </div>
+      <div class="json-toggle" onclick="toggleJson()" style="display:none" id="json-toggle-bar">
+        <span>JSON ডাটা</span><span id="json-arrow">▼</span>
+      </div>
+      <div class="json-body" id="json-body">
+        <pre id="json-pre"></pre>
+      </div>
+    </div>
+
+  </section>
+</main>
+
+<script>
+let currentData = null;
+
+// ── Drag & Drop ──
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showError('শুধুমাত্র PDF ফাইল আপলোড করুন।');
+    return;
+  }
+  hideError();
+  document.getElementById('file-info').textContent = `✅ ${file.name} (${(file.size/1024).toFixed(1)} KB)`;
+  document.getElementById('file-info').classList.add('show');
+  uploadFile(file);
+}
+
+function uploadFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const progressWrap = document.getElementById('progress-wrap');
+  const progressFill = document.getElementById('progress-fill');
+  const progressText = document.getElementById('progress-text');
+  progressWrap.classList.add('show');
+
+  // fake progress
+  let prog = 0;
+  const ticker = setInterval(() => {
+    prog = Math.min(prog + Math.random() * 12, 85);
+    progressFill.style.width = prog + '%';
+    progressText.textContent = prog < 30 ? 'ফাইল পড়া হচ্ছে...'
+                              : prog < 60 ? 'টেক্সট বের করা হচ্ছে...'
+                              : 'ছবি প্রসেস করা হচ্ছে...';
+  }, 300);
+
+  fetch('/upload-pdf', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(res => {
+      clearInterval(ticker);
+      progressFill.style.width = '100%';
+      progressText.textContent = 'সম্পন্ন! ✅';
+      if (res.status === 'success') {
+        setTimeout(() => renderResult(res), 400);
+      } else {
+        showError(res.message || 'একটি সমস্যা হয়েছে।');
+      }
+    })
+    .catch(() => {
+      clearInterval(ticker);
+      showError('সার্ভারের সাথে সংযোগ করা যায়নি।');
+    });
+}
+
+// ── Render ──
+function renderResult(res) {
+  currentData = res;
+  const d = res.data;
+
+  document.getElementById('result-section').classList.add('show');
+  document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+
+  // Photo
+  if (res.photo) {
+    const wrap = document.getElementById('photo-wrap');
+    wrap.innerHTML = `<img src="data:image/${res.photo_ext || 'jpeg'};base64,${res.photo}" alt="photo">`;
+  }
+
+  // Signature
+  if (res.signature) {
+    const wrap = document.getElementById('sig-wrap');
+    wrap.innerHTML = `<p>স্বাক্ষর</p><img src="data:image/png;base64,${res.signature}" alt="signature">`;
+  }
+
+  // Names & badges
+  document.getElementById('name-bn').textContent = d.name?.bangla || '—';
+  document.getElementById('name-en').textContent = d.name?.english || '—';
+  document.getElementById('nid-num').textContent  = d.national_id || '—';
+  document.getElementById('voter-num').textContent = d.voter_no || '—';
+
+  const badges = document.getElementById('badges');
+  badges.innerHTML = '';
+  if (d.gender)  addBadge(badges, d.gender === 'male' ? '♂ পুরুষ' : '♀ মহিলা', 'badge-blue');
+  if (d.religion) addBadge(badges, d.religion, 'badge-gray');
+  if (d.marital_status) addBadge(badges, d.marital_status, 'badge-gray');
+  if (d.blood_group) addBadge(badges, '🩸 ' + d.blood_group, 'badge-green');
+
+  // Personal grid
+  renderDataCard('personal-grid', [
+    { title: '🪪 পরিচয়', fields: [
+      ['জাতীয় পরিচয় নং', d.national_id],
+      ['ভোটার নং', d.voter_no],
+      ['ফর্ম নং', d.form_no],
+      ['পিন', d.pin],
+      ['ট্যাগ', d.tag],
+    ]},
+    { title: '📅 জন্ম তথ্য', fields: [
+      ['জন্ম তারিখ', d.date_of_birth],
+      ['জন্মস্থান', d.birth_place],
+      ['জন্ম নিবন্ধন নং', d.birth_registration_no],
+    ]},
+    { title: '👨‍👩‍👦 পারিবারিক তথ্য', fields: [
+      ['পিতার নাম', d.father_name, true],
+      ['মাতার নাম', d.mother_name, true],
+      ['স্বামী/স্ত্রীর নাম', d.spouse_name, true],
+      ['পেশা', d.occupation, true],
+    ]},
+  ]);
+
+  // Address grid
+  const addrGrid = document.getElementById('addr-grid');
+  addrGrid.innerHTML = '';
+  renderAddrCard(addrGrid, '📍 বর্তমান ঠিকানা', d.present_address);
+  renderAddrCard(addrGrid, '🏡 স্থায়ী ঠিকানা', d.permanent_address);
+
+  // Other grid
+  renderDataCard('other-grid', [
+    { title: '📊 অতিরিক্ত তথ্য', fields: [
+      ['শিক্ষা', d.education, true],
+      ['ধর্ম', d.religion],
+      ['রক্তের গ্রুপ', d.blood_group],
+      ['ভোটার এলাকা', d.voter_area, true],
+      ['ল্যাপটপ আইডি', d.laptop_id],
+      ['NID পিতা', d.nid_father],
+      ['আঙুলের সংখ্যা', d.no_finger],
+    ]},
+  ]);
+
+  // JSON
+  document.getElementById('json-pre').textContent = JSON.stringify(d, null, 2);
+}
+
+function addBadge(container, text, cls) {
+  const b = document.createElement('span');
+  b.className = `badge ${cls}`;
+  b.textContent = text;
+  container.appendChild(b);
+}
+
+function renderDataCard(containerId, sections) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  sections.forEach(sec => {
+    const card = document.createElement('div');
+    card.className = 'data-card';
+    card.innerHTML = `<h3>${sec.title}</h3>`;
+    sec.fields.forEach(([key, val, bangla]) => {
+      const row = document.createElement('div');
+      row.className = 'field-row';
+      const valClass = !val ? 'field-val empty' : bangla ? 'field-val bangla' : 'field-val';
+      row.innerHTML = `<span class="field-key">${key}</span><span class="${valClass}">${val || '—'}</span>`;
+      card.appendChild(row);
+    });
+    container.appendChild(card);
+  });
+}
+
+function renderAddrCard(container, title, addr) {
+  if (!addr) return;
+  const card = document.createElement('div');
+  card.className = 'addr-card';
+  const labels = {
+    division: 'বিভাগ', district: 'জেলা', rmo: 'RMO',
+    upozila: 'উপজেলা', union_ward: 'ইউনিয়ন/ওয়ার্ড',
+    mouza_moholla: 'মৌজা/মহল্লা', village_road: 'গ্রাম/রাস্তা',
+    post_office: 'ডাকঘর', postal_code: 'পোস্টাল কোড', region: 'অঞ্চল',
+    ward_for_union_porishod: 'ওয়ার্ড নং',
+  };
+  let rows = '';
+  Object.entries(labels).forEach(([k, label]) => {
+    const val = addr[k];
+    if (val) rows += `<div class="field-row"><span class="field-key">${label}</span><span class="field-val bangla">${val}</span></div>`;
+  });
+  card.innerHTML = `<h3>${title}</h3>${rows || '<p style="color:var(--muted);font-size:.82rem">তথ্য পাওয়া যায়নি</p>'}`;
+  container.appendChild(card);
+}
+
+// ── JSON actions ──
+function toggleJson() {
+  const body = document.getElementById('json-body');
+  body.classList.toggle('open');
+}
+function copyJson() {
+  if (!currentData) return;
+  navigator.clipboard.writeText(JSON.stringify(currentData.data, null, 2))
+    .then(() => alert('JSON কপি হয়েছে!'));
+}
+function downloadJson() {
+  if (!currentData) return;
+  const blob = new Blob([JSON.stringify(currentData.data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'nid_data.json';
+  a.click();
+}
+
+// ── Error ──
+function showError(msg) {
+  document.getElementById('error-msg').textContent = msg;
+  document.getElementById('error-box').classList.add('show');
+}
+function hideError() {
+  document.getElementById('error-box').classList.remove('show');
+}
+</script>
+</body>
+</html>
